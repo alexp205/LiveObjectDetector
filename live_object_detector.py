@@ -9,8 +9,12 @@ import os
 import re
 
 from numpy import genfromtxt
+from tensorflow.contrib import predictor
 
 tf.logging.set_verbosity(tf.logging.INFO)
+
+use_saved_model = False
+saved_model_dir = ""
 
 def loadImageData():
     """
@@ -36,7 +40,9 @@ def loadImageData():
     print("training features (images) loaded")
     
     # Load Training Labels
-    train_labels = genfromtxt("./Data/train_labels.csv", delimiter=',')
+    #train_labels = genfromtxt("./Data/train_labels.csv", delimiter=',')
+    # DEBUG
+    train_labels = genfromtxt("./Data/train_mini_labels.csv", delimiter=',')
     tr_labels = train_labels.astype(int)
 
     # DEBUG
@@ -53,7 +59,9 @@ def loadImageData():
     print("testing features (images) loaded")
     
     # Load Testing Labels
-    test_labels = genfromtxt("./Data/test_labels.csv", delimiter=',')
+    #test_labels = genfromtxt("./Data/test_labels.csv", delimiter=',')
+    # DEBUG
+    test_labels = genfromtxt("./Data/test_mini_labels.csv", delimiter=',')
     tst_labels = test_labels.astype(int)
 
     # DEBUG
@@ -138,7 +146,7 @@ def cnnModelFxn(features, labels, mode):
     # preserve width and height
     # Input Tensor: [batch_size, 400, 400, 3]
     # Output Tensor: [batch_size, 400, 400, 32]
-    conv_1 = tf.layers.conv_2d(
+    conv_1 = tf.layers.conv2d(
         inputs=input_layer,
         filters=32,
         kernel_size=50,
@@ -157,7 +165,7 @@ def cnnModelFxn(features, labels, mode):
     # Computes 64 features using a 5x5 filter, padding is added to preserve width and height
     # Input Tensor: [batch_size, 40, 40, 32]
     # Output Tensor: [batch_size, 40, 40, 64]
-    conv_2 = tf.layers.conv_2d(
+    conv_2 = tf.layers.conv2d(
         inputs=pool_1,
         filters=64,
         kernel_size=5,
@@ -217,42 +225,87 @@ def cnnModelFxn(features, labels, mode):
     return tf.estimator.EstimatorSpec(
         mode=mode, loss=loss, eval_metric_ops=eval_metric_ops)
 
+def serving_input_receiver_fxn():
+    holder = tf.placeholder(dtype=tf.float32,
+                            shape=[None, 8],
+                            name="input_placeholder_tensor")
+    inputs = {"x": holder}
+    
+    return tf.estimator.export.ServingInputReceiver(inputs, inputs)
+
 def main(argv=None):
-    # Load Data
-    train_data, train_labels, test_data, test_labels = loadImageData()
+    if not use_saved_model:
+        # DEBUG
+        print("---------- PERFORMING TRAINING AND MODEL SAVING ----------")
 
-    # Create Estimator
-    live_image_classifier = tf.estimator.Estimator(
-        model_fn=cnnModelFxn, model_dir="live_object_detector_model")
+        # Load Data
+        train_data, train_labels, test_data, test_labels = loadImageData()
 
-    # Setup Logging
-    # -------------
-    # Log values in "softmax_tensor" with label "probabilities"
-    tensors_to_log = {"probabilities": "softmax_tensor"}
-    logging_hook = tf.train.LoggingTensorHook(tensors=tensors_to_log, every_n_iter=50)
+        # DEBUG
+        print("PROGRESS - data loaded")
 
-"""
-    # Train
-    train_input_fn = tf.estimator.inputs.numpy_input_fn(
-        x={"x": train_data},
-        y=train_labels,
-        batch_size=100,
-        num_epochs=None,
-        shuffle=True)
-    live_image_classifier.train(
-        input_fn=train_input_fn,
-        steps=20000,
-        hooks=[logging_hook])
+        # Create Estimator
+        live_image_classifier = tf.estimator.Estimator(
+            model_fn=cnnModelFxn, model_dir="live_object_detector_model")
 
-    # Evaluate and Display Results
-    eval_input_fn = tf.estimator.inputs.numpy_input_fn(
-        x={"x": test_data},
-        y=test_labels,
-        num_epochs=1,
-        shuffle=False)
-    eval_results = live_image_classifier.evaluate(input_fn=eval_input_fn)
-    print(eval_results)
+        # DEBUG
+        print("PROGRESS - estimator created")
+
+        # Setup Logging
+        # -------------
+        # Log values in "softmax_tensor" with label "probabilities"
+        tensors_to_log = {"probabilities": "softmax_tensor"}
+        logging_hook = tf.train.LoggingTensorHook(tensors=tensors_to_log, every_n_iter=50)
+
+        # DEBUG
+        print("PROGRESS - logging setup")
+        print("PROGRESS - starting training")
+
+        # Train
+        train_input_fn = tf.estimator.inputs.numpy_input_fn(
+            x={"x": train_data},
+            y=train_labels,
+            batch_size=8,
+            num_epochs=None,
+            shuffle=True)
+        live_image_classifier.train(
+            input_fn=train_input_fn,
+            steps=20000,
+            hooks=[logging_hook])
+
+        # DEBUG
+        print("PROGRESS - training complete")
+
+        export_dir = live_image_classifier.export_savedmodel(export_dir_base="TEST_live_object_detector_model",
+                                                             serving_input_receiver_fn=serving_input_receiver_fxn)
+
+        print("NOTE: model saved at the following location, please mark down for future use")
+        print(export_dir)
+
+        # DEBUG
+        print("PROGRESS - starting testing")
+
+        # Evaluate and Display Results
+        eval_input_fn = tf.estimator.inputs.numpy_input_fn(
+            x={"x": test_data},
+            y=test_labels,
+            num_epochs=1,
+            shuffle=False)
+        eval_results = live_image_classifier.evaluate(input_fn=eval_input_fn)
+        print(eval_results)
+
+        # DEBUG
+        print("PROGRESS - testing complete")
+    else:
+        # DEBUG
+        print("---------- USING SAVED MODEL ----------")
+
+        predict_fxn = predictor.from_saved_model(saved_model_dir)
+
+    # DEBUG
+    #print("PROGRESS - about to visualize")
       
+"""
     # Visualize
     cap = cv2.VideoCapture(0)
     while True:
@@ -261,11 +314,14 @@ def main(argv=None):
         # Expand dimensions since the model expects images to have shape: [1, 400, 400, 3]
         predict_data = np.expand_dims(image_np, axis=0)
         # Prediction
-        predict_input_fn = tf.estimator.inputs.numpy_input_fn(
-        x={"x": predict_data},
-        num_epochs=1,
-        shuffle=False)
-        predictions = live_image_classifier.predict(input_fn=predict_input_fn)
+        if not use_saved_model:
+            predict_input_fn = tf.estimator.inputs.numpy_input_fn(
+            x={"x": predict_data},
+            num_epochs=1,
+            shuffle=False)
+            predictions = live_image_classifier.predict(input_fn=predict_input_fn)
+        else:
+            predictions = predict_fxn({"x": predict_data})
         
         # Visualization of the results of a detection
         # Detected objects correspond with the color of the outline box: 
@@ -274,8 +330,12 @@ def main(argv=None):
         #   - yellow = lemon
         # Certainties/accuracies are printed out to the console on detection with the 
         # corresponding label
-        max_idx = np.argmax(predictions)
-        predicted_certainty = predictions[max_idx]
+        if not use_saved_model:
+            max_idx = np.argmax(predictions)
+            predicted_certainty = predictions[max_idx]
+        else:
+            max_idx = np.argmax(predictions['scores'])
+            predicted_certainty = predictions['scores'][max_idx]
         if max_idx == 0 and predicted_certainty > .4:
             cv2.rectangle(image_np, (0,0), (398,398), (0,255,0), 2)
             print("Detected Object: Tennis Ball; Certainty:", predicted_certainty * 100, "%")
@@ -290,6 +350,6 @@ def main(argv=None):
           cv2.destroyAllWindows()
           break
 """
-
+    
 if __name__ == "__main__":
   tf.app.run()
