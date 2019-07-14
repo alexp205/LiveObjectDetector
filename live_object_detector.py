@@ -5,6 +5,8 @@ from __future__ import print_function
 import numpy as np
 import tensorflow as tf
 import cv2
+import os
+import re
 
 from numpy import genfromtxt
 
@@ -19,22 +21,43 @@ def loadImageData():
       - mangos = 1
       - lemons = 2
     """
+
+    # DEBUG
+    print("in loadImageData")
     
     # Load Training Images
-    tr_relpaths = getImagePaths(os.getcwd() + "/Data/Images/train")
-    tr_data = parseImages(tr_relpath1s, 1305)
+    #tr_relpaths = getImagePaths(os.getcwd() + "/Data/Images/train")
+    #tr_data = parseImages(tr_relpaths, 1305)
+    # DEBUG
+    tr_relpaths = getImagePaths(os.getcwd() + "/Data/Images/train_mini")
+    tr_data = parseImages(tr_relpaths, 15)
+
+    # DEBUG
+    print("training features (images) loaded")
     
     # Load Training Labels
-    train_labels = genfromtxt("Data/train_labels.csv", delimiter=',')
+    train_labels = genfromtxt("./Data/train_labels.csv", delimiter=',')
     tr_labels = train_labels.astype(int)
+
+    # DEBUG
+    print("training labels loaded")
     
     # Load Testing Images
-    tst_relpaths = getImagePaths(os.getcwd() + "/Data/Images/test")
-    tst_data = parseImages(tst_relpaths, 129)
+    #tst_relpaths = getImagePaths(os.getcwd() + "/Data/Images/test")
+    #tst_data = parseImages(tst_relpaths, 129)
+    # DEBUG
+    tst_relpaths = getImagePaths(os.getcwd() + "/Data/Images/test_mini")
+    tst_data = parseImages(tst_relpaths, 6)
+
+    # DEBUG
+    print("testing features (images) loaded")
     
     # Load Testing Labels
-    test_labels = genfromtxt("Data/test_labels.csv", delimiter=',')
+    test_labels = genfromtxt("./Data/test_labels.csv", delimiter=',')
     tst_labels = test_labels.astype(int)
+
+    # DEBUG
+    print("testing labels loaded")
     
     return tr_data, tr_labels, tst_data, tst_labels
 
@@ -46,6 +69,10 @@ def parseImages(filenames, size):
     data = np.zeros(shape=(size,400,400,3))
     with tf.Session() as sess:
         for idx, filename in enumerate(filenames):
+
+            # DEBUG
+            print("parsing image file: ", filename)
+
             img_file = tf.read_file(filename)
             img_decoded = tf.image.decode_image(img_file, channels=3)
             img_resized = tf.image.resize_image_with_crop_or_pad(img_decoded, 400, 400)
@@ -59,12 +86,20 @@ def getImagePaths(img_path):
     """
     Gets the relative paths for all image files in the specified directory
     """
+
+    # DEBUG
+    print("img_path: ", img_path)
+
     fileset = set()
     root = os.getcwd()
     
-    for dir,_,files in os.walk(img_path):
+    for folder,_,files in os.walk(img_path):
         for filename in files:
-            rel_dir = os.path.relpath(dir, root)
+
+            # DEBUG
+            #print("file: ", filename)
+
+            rel_dir = os.path.relpath(folder, root)
             rel_file = os.path.join(rel_dir, filename)
             fileset.add(rel_file)
     
@@ -74,14 +109,14 @@ def getImagePaths(img_path):
     return fileset
 
 # Source: https://stackoverflow.com/questions/4836710/does-python-have-a-built-in-function-for-string-natural-sort
-def human_sort(list):
+def human_sort(list_to_sort):
     """
     Sorts a list according to human/natural sorting
     """
     convert = lambda text: int(text) if text.isdigit() else text.lower()
     alphanumeric_key = lambda key: [ convert(part) for part in re.split('([0-9]+)', key) ]
     
-    return sorted(list, key = alphanumeric_key)
+    return sorted(list_to_sort, key = alphanumeric_key)
     
 def cnnModelFxn(features, labels, mode):
     """
@@ -182,7 +217,7 @@ def cnnModelFxn(features, labels, mode):
     return tf.estimator.EstimatorSpec(
         mode=mode, loss=loss, eval_metric_ops=eval_metric_ops)
 
-def main():
+def main(argv=None):
     # Load Data
     train_data, train_labels, test_data, test_labels = loadImageData()
 
@@ -196,6 +231,7 @@ def main():
     tensors_to_log = {"probabilities": "softmax_tensor"}
     logging_hook = tf.train.LoggingTensorHook(tensors=tensors_to_log, every_n_iter=50)
 
+"""
     # Train
     train_input_fn = tf.estimator.inputs.numpy_input_fn(
         x={"x": train_data},
@@ -253,6 +289,7 @@ def main():
         if cv2.waitKey(25) & 0xFF == ord('q'):
           cv2.destroyAllWindows()
           break
+"""
 
 if __name__ == "__main__":
   tf.app.run()
